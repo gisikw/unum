@@ -1,0 +1,37 @@
+name: Build and Deploy
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: nixos
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure Attic
+        run: |
+          mkdir -p ~/.config/attic
+          printf '%s\n' \
+            'default-server = "forge"' \
+            '' \
+            '[servers.forge]' \
+            "endpoint = \"$ATTIC_CACHE_URL\"" \
+            "token = \"$(cat $ATTIC_TOKEN_FILE)\"" \
+            > ~/.config/attic/config.toml
+
+      - name: Build
+        run: nix build .#default -L
+
+      - name: Push to Attic
+        run: attic push fort ./result
+
+      - name: Register Package
+        run: |
+          STORE_PATH=$(readlink -f ./result)
+          fort drhorrible runtime-package-register "{\"repo\": \"infra/unum\", \"storePath\": \"$STORE_PATH\", \"rev\": \"$GITHUB_SHA\"}"
+
+      - name: Trigger Refresh
+        run: |
+          fort drhorrible refresh '{"capability": "runtime-package"}'
