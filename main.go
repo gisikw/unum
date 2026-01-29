@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	"gopkg.in/yaml.v3"
@@ -33,6 +34,20 @@ func configDir() string {
 
 func configPath(persona string) string {
 	return filepath.Join(configDir(), persona+".yaml")
+}
+
+func cacheDir() string {
+	if xdg := os.Getenv("XDG_CACHE_HOME"); xdg != "" {
+		return filepath.Join(xdg, "unum")
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".cache", "unum")
+}
+
+func sessionDir(persona, workDir string) string {
+	// Convert /home/dev/Projects/foo to home-dev-Projects-foo
+	dasherized := strings.ReplaceAll(strings.TrimPrefix(workDir, "/"), "/", "-")
+	return filepath.Join(cacheDir(), persona, dasherized)
 }
 
 func loadConfig(persona string) (*Config, error) {
@@ -98,12 +113,11 @@ func invoke(persona string, extraArgs []string) error {
 		return err
 	}
 
-	// Create temp directory
-	tmpDir, err := os.MkdirTemp("", "unum-")
-	if err != nil {
+	// Create persistent session directory (enables --continue and --resume)
+	sessDir := sessionDir(persona, workDir)
+	if err := os.MkdirAll(sessDir, 0755); err != nil {
 		return err
 	}
-	// Note: we don't defer cleanup because we exec into claude
 
 	// Expand template variables in prompt
 	prompt := os.Expand(cfg.Prompt, func(key string) string {
@@ -144,8 +158,8 @@ func invoke(persona string, extraArgs []string) error {
 		return fmt.Errorf("claude not found in PATH")
 	}
 
-	// Change to temp directory and exec claude
-	if err := os.Chdir(tmpDir); err != nil {
+	// Change to session directory and exec claude
+	if err := os.Chdir(sessDir); err != nil {
 		return err
 	}
 
